@@ -1,5 +1,6 @@
 import { AccountService } from './services/account.service';
-import { Component } from '@angular/core';
+import { Component, NgZone } from '@angular/core';
+
 
 // On doit commencer par ajouter signalr dans les node_modules: npm install @microsoft/signalr
 // Ensuite on inclut la librairie
@@ -25,25 +26,32 @@ export class AppComponent {
 
   baseUrl = "https://localhost:7056/";
 
-  // Ajouter une variable nbWins
+  nbWins = 0;
 
   private hubConnection?: signalR.HubConnection
 
   isConnected = false;
   nbClicks = 0;
-  // TODO: Ajouter 3 variables: Le multiplier, le multiplierCost, mais également le multiplierIntialCost pour remettre à jour multiplierCost après chaque fin de round (ou sinon on peut passer l'information dans l'appel qui vient du Hub!)
+  multiplierInitialCost = 0
+  multiplierCost = 0;
+  multiplier = 1;
 
-  constructor(public account:AccountService){
+  constructor(public account:AccountService, private zone: NgZone){
   }
 
   Increment() {
-    //TODO: Augmenter le nbClicks par la valeur du multiplicateur
-    this.nbClicks += 1;
+    this.nbClicks += this.multiplier;
     this.hubConnection!.invoke('Increment')
   }
 
   BuyMultiplier() {
-    // TODO: Implémenter la méthode qui permet d'acheter un niveau de multiplier (Appel au Hub!)
+    if(this.nbClicks >= this.multiplierCost)
+    {
+      this.hubConnection!.invoke('BuyMultiplier');
+      this.nbClicks -= this.multiplierCost;
+      this.multiplier *= 2;
+      this.multiplierCost *= 2;
+    }
   }
 
   async register(){
@@ -79,38 +87,48 @@ export class AppComponent {
                               .build();
 
     if(!this.hubConnection)
-    {
-      console.log("Impossible de créer un HubConnection???");
       return;
-    }
 
     this.hubConnection.on('GameInfo', (data:GameInfo) => {
-      this.isConnected = true;
-      // TODO: Mettre à jour les variables pour le coût du multiplier et le nbWins
+      console.log("Received GameInfo");
+      this.zone.run(() => {
+        console.log(data);
+        this.isConnected = true;
+        this.multiplierInitialCost = data.multiplierCost;
+        this.multiplierCost = this.multiplierInitialCost;
+        this.nbWins = data.nbWins;
+      });
     });
 
     this.hubConnection.on('EndRound', (data:RoundResult) => {
-      this.nbClicks = 0;
-      // TODO: Reset du multiplierCost et le multiplier
+      console.log("Received EndRound");
+      this.zone.run(() => {
+        console.log(data);
+        this.nbClicks = 0;
+        this.multiplierCost = this.multiplierInitialCost;
+        this.multiplier = 1;
 
-      // TODO: Si le joueur a gagné, on augmene nbWins
+        if(data.winners.indexOf(this.account.username) >= 0)
+          this.nbWins++;
 
-      if(data.nbClicks > 0){
-        let phrase = " a gagné avec ";
-        if(data.winners.length > 1)
-          phrase = " ont gagnées avec "
-        alert(data.winners.join(", ") + phrase + data.nbClicks + " clicks!");
-      }
-      else{
-        alert("Aucun gagnant...");
-      }
+        if(data.nbClicks > 0){
+          let phrase = " a gagné avec ";
+          if(data.winners.length > 1)
+            phrase = " ont gagnées avec "
+          alert(data.winners.join(", ") + phrase + data.nbClicks + " clicks!");
+        }
+        else{
+          alert("Aucun gagnant...");
+        }
+      });
     });
 
     this.hubConnection
       .start()
       .then(() => {
-        console.log("Connecté au Hub");
+        console.log("Connected to Hub");
       })
       .catch(err => console.log('Error while starting connection: ' + err))
   }
 }
+
